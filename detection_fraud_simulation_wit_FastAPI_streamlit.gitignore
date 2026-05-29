@@ -1,0 +1,19 @@
+# Ne pas uploader les modèles lourds et scalers
+*.pkl
+
+# Ne pas uploader la base de données locale de MLflow
+mlruns/
+.mlflow/
+
+# Cache Python
+__pycache__/
+*.pyc
+
+# Si vous utilisez un environnement virtuel local
+env/
+venv/
+.venv/
+
+# Fichiers système
+.DS_Store
+Thumbs.db
