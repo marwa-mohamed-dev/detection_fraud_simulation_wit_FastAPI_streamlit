@@ -34,7 +34,6 @@ col1, col2 = st.columns([1, 2])
 with col1:
     st.header("Simuler une transaction")
     
-    #  Raccourcis de simulation automatique
     st.subheader("Raccourcis scénarios")
     scenario = st.radio(
         "Choisir un profil type :",
@@ -63,6 +62,28 @@ with col1:
     montant = st.number_input("Montant de la transaction (€)", min_value=0.5, max_value=5000.0, value=default_montant)
     distance = st.number_input("Distance depuis le dernier achat (KM)", min_value=0.0, max_value=20000.0, value=default_distance)
     echecs = st.slider("Nombre d'échecs code PIN consécutifs", min_value=0, max_value=3, value=default_echecs)
+    
+    if st.button("Envoyer la transaction au réseau"):
+        tx_id = f"TX-{random.randint(100000, 999999)}"
+        payload = {
+            "Transaction_ID": tx_id,
+            "Montant": montant,
+            "Distance_Dernier_Achat_KM": distance,
+            "Echecs_Code_PIN": echecs
+        }
+        
+        try:
+            res = requests.post("http://127.0.0.1:8000/v1/evaluate-transaction", json=payload).json()
+            # Ajouter au début de notre liste historique
+            st.session_state.tx_history.insert(0, {
+                "ID": tx_id,
+                "Montant": f"{montant} €",
+                "Distance": f"{distance} KM",
+                "Score Risque": f"{res['score_risque']:.1%}",
+                "Décision": res['decision']
+            })
+        except:
+            st.error("L'API FastAPI sur le port 8000 n'est pas lancée.")
 
 with col2:
     st.header("Flux des transactions en direct")
