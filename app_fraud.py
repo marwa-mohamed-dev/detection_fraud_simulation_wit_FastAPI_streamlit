@@ -1,12 +1,18 @@
 import pickle
+import os
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-# Chargement du modèle anti-fraude
-with open("fraud_model.pkl", "rb") as f:
+# CONFIGURATION CHEMINS ABSOLUS
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "fraud_model.pkl")
+SCALER_PATH = os.path.join(BASE_DIR, "fraud_scaler.pkl")
+
+# Chargement sécurisé du modèle anti-fraude
+with open(MODEL_PATH, "rb") as f:
     model = pickle.load(f)
-with open("fraud_scaler.pkl", "rb") as f:
+with open(SCALER_PATH, "rb") as f:
     scaler = pickle.load(f)
 
 app = FastAPI(title="Moteur de Risque Transactionnel Temps Réel", version="1.0")

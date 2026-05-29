@@ -15,13 +15,15 @@ def start_fastapi_backend():
     if current_dir not in sys.path:
         sys.path.append(current_dir)
         
-    # 💡 AJOUT : Si les fichiers n'existent pas sur le serveur cloud, on lance l'entraînement
-    if not os.path.exists(os.path.join(current_dir, "fraud_model.pkl")):
+    # Si le modèle n'existe pas, on le génère de manière synchrone
+    model_path = os.path.join(current_dir, "fraud_model.pkl")
+    if not os.path.exists(model_path):
         with st.spinner("⏳ Premier démarrage : Entraînement du modèle anti-fraude en cours..."):
+            # subprocess.run attend la FIN complète de l'exécution
             subprocess.run([sys.executable, "train_fraud.py"], cwd=current_dir)
-            time.sleep(1)
+            time.sleep(2) # Sécurité pour la synchronisation des fichiers sur le Cloud
 
-    # Lancement d'uvicorn une fois les fichiers garantis présents
+    # Lancement d'uvicorn sur l'hôte universel 0.0.0.0
     process = subprocess.Popen(
         ["uvicorn", "app_fraud:app", "--host", "0.0.0.0", "--port", "8000"],
         cwd=current_dir,
@@ -29,8 +31,8 @@ def start_fastapi_backend():
         stderr=subprocess.PIPE
     )
     
-    # Attente active pour vérifier si l'API répond
-    for _ in range(10):
+    # Attente active (jusqu'à 15 secondes) pour laisser le serveur Uvicorn se binder au port 8000
+    for _ in range(15):
         time.sleep(1)
         try:
             response = requests.get("http://127.0.0.1:8000/", timeout=1)
