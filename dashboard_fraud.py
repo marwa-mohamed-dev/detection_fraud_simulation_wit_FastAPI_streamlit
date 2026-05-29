@@ -1,56 +1,43 @@
 import streamlit as st
-import requests
 import time
 import random
 import pandas as pd
-import subprocess
 import os
 import sys
+import pickle
 
-#  Lancement  de FastAPI en tâche de fond sur le Cloud
+st.set_page_config(page_title="Fraud Watch - Security Dashboard", layout="wide")
+
+# 1. Chargement direct des modèles en mémoire
 @st.cache_resource
-def start_fastapi_backend():
-    """Génère le modèle si nécessaire et démarre l'API FastAPI."""
+def load_fraud_models():
+    """Verifie l'existence des fichiers pkl, les genere si besoin, et les charge en memoire."""
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    if current_dir not in sys.path:
-        sys.path.append(current_dir)
-        
-    # Si le modèle n'existe pas, on le génère de manière synchrone
-    model_path = os.path.join(current_dir, "fraud_model.pkl")
-    if not os.path.exists(model_path):
-        with st.spinner("⏳ Premier démarrage : Entraînement du modèle anti-fraude en cours..."):
-            # subprocess.run attend la FIN complète de l'exécution
-            subprocess.run([sys.executable, "train_fraud.py"], cwd=current_dir)
-            time.sleep(2) # Sécurité pour la synchronisation des fichiers sur le Cloud
-
-    # Lancement d'uvicorn sur l'hôte universel 0.0.0.0
-    process = subprocess.Popen(
-        ["uvicorn", "app_fraud:app", "--host", "0.0.0.0", "--port", "8000"],
-        cwd=current_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
     
-    # Attente active (jusqu'à 15 secondes) pour laisser le serveur Uvicorn se binder au port 8000
-    for _ in range(15):
-        time.sleep(1)
-        try:
-            response = requests.get("http://127.0.0.1:8000/", timeout=1)
-            if response.status_code in [200, 404]:
-                break
-        except requests.exceptions.ConnectionError:
-            continue
+    model_path = os.path.join(current_dir, "fraud_model.pkl")
+    scaler_path = os.path.join(current_dir, "fraud_scaler.pkl")
+    
+    if not os.path.exists(model_path) or not os.path.exists(scaler_path):
+        with st.spinner("Premier demarrage : Entrainement du modele anti-fraude en cours..."):
+            import subprocess
+            subprocess.run([sys.executable, "train_fraud.py"], cwd=current_dir)
+            time.sleep(2)
             
-    return process
-# Initialisation automatique du serveur au chargement de la page
-backend_process = start_fastapi_backend()
+    with open(model_path, "rb") as f:
+        loaded_model = pickle.load(f)
+    with open(scaler_path, "rb") as f:
+        loaded_scaler = pickle.load(f)
+        
+    return loaded_model, loaded_scaler
 
-st.set_page_config(page_title="Fraud Watch - Security Dashboard", page_icon="🛡️", layout="wide")
+try:
+    model, scaler = load_fraud_models()
+except Exception as e:
+    st.error(f"Erreur lors du chargement des modèles : {e}")
 
-st.title("🛡️ Fraud Watch : Moteur de Décision en Temps Réel")
-st.write("Simulation de flux de transactions bancaires en direct.")
+st.title("Fraud Watch : Moteur de Décision en Temps Réel")
+st.write("Simulation de flux de transactions bancaires en direct sur le Cloud.")
 
-# Initialiser un historique des transactions évaluées dans la session
 if 'tx_history' not in st.session_state:
     st.session_state.tx_history = []
 
@@ -65,58 +52,48 @@ with col1:
         ["Manuel", "Achat Standard (Sain)", "Voyage Suspect (Review)", "Brute-Force & Gros Montant (Fraude)"]
     )
     
-    # Configuration des valeurs par défaut selon le scénario sélectionné
     if scenario == "Achat Standard (Sain)":
-        default_montant = 35.0
-        default_distance = 1.2
-        default_echecs = 0
+        default_montant, default_distance, default_echecs = 35.0, 1.2, 0
     elif scenario == "Voyage Suspect (Review)":
-        default_montant = 180.0
-        default_distance = 120.0
-        default_echecs = 1
+        default_montant, default_distance, default_echecs = 180.0, 120.0, 1
     elif scenario == "Brute-Force & Gros Montant (Fraude)":
-        default_montant = 1500.0
-        default_distance = 850.0
-        default_echecs = 3
+        default_montant, default_distance, default_echecs = 1500.0, 850.0, 3
     else:
-        default_montant = 45.0
-        default_distance = 2.5
-        default_echecs = 0
+        default_montant, default_distance, default_echecs = 45.0, 2.5, 0
 
-    # Inputs Streamlit connectés aux valeurs par défaut
-    montant = st.number_input("Montant de la transaction (€)", min_value=0.5, max_value=5000.0, value=default_montant)
+    montant = st.number_input("Montant de la transaction (EUR)", min_value=0.5, max_value=5000.0, value=default_montant)
     distance = st.number_input("Distance depuis le dernier achat (KM)", min_value=0.0, max_value=20000.0, value=default_distance)
     echecs = st.slider("Nombre d'échecs code PIN consécutifs", min_value=0, max_value=3, value=default_echecs)
 
     st.write("---")
     if st.button("Envoyer la transaction au réseau", use_container_width=True):
         tx_id = f"TX-{random.randint(100000, 999999)}"
-        payload = {
-            "Transaction_ID": tx_id,
-            "Montant": montant,
-            "Distance_Dernier_Achat_KM": distance,
-            "Echecs_Code_PIN": echecs
-        }
         
-        try:
-            # Appel HTTP à l'API locale
-            response = requests.post("http://127.0.0.1:8000/v1/evaluate-transaction", json=payload, timeout=5)
-            res = response.json()
+        # Inférence directe
+        input_data = pd.DataFrame([{
+            'Montant': montant,
+            'Distance_Dernier_Achat_KM': distance,
+            'Echecs_Code_PIN': echecs
+        }])
+        
+        input_scaled = scaler.transform(input_data)
+        score_risque = float(model.predict_proba(input_scaled)[0][1])
+        
+        if score_risque >= 0.65:
+            decision = "BLOCK"
+        elif score_risque >= 0.35:
+            decision = "REVIEW_MANUAL"
+        else:
+            decision = "APPROVE"
             
-            # Insertion du résultat en tête de liste pour l'historique
-            st.session_state.tx_history.insert(0, {
-                "ID": tx_id,
-                "Montant": f"{montant:.2f} €",
-                "Distance": f"{distance:.1f} KM",
-                "Score Risque": f"{res['score_risque']:.1%}",
-                "Décision": res['decision']
-            })
-            st.success(f"Transaction {tx_id} traitée avec succès !")
-        except Exception as e:
-            st.error(" Erreur : L'API FastAPI sur le port 8000 ne répond pas.")
-            # 💡 Affichage de débogage pour comprendre si le processus a planté
-            if backend_process.poll() is not None:
-                st.warning("Le processus FastAPI s'est arrêté de manière inattendue.")
+        st.session_state.tx_history.insert(0, {
+            "ID": tx_id,
+            "Montant": f"{montant:.2f} EUR",
+            "Distance": f"{distance:.1f} KM",
+            "Score Risque": f"{score_risque:.1%}",
+            "Décision": decision
+        })
+        st.success(f"Transaction {tx_id} évaluée localement avec succès.")
 
 with col2:
     st.header("Flux des transactions en direct")
@@ -132,4 +109,4 @@ with col2:
             
         st.dataframe(df_display.style.map(color_decision, subset=['Décision']), use_container_width=True)
     else:
-        st.info("En attente de transactions... Utilisez le panneau de gauche pour en générer une.")
+        st.info("En attente de transactions... Utilisez le panneau de gauche pour envoyer un flux.")
