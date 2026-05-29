@@ -10,16 +10,21 @@ import sys
 #  Lancement  de FastAPI en tâche de fond sur le Cloud
 @st.cache_resource
 def start_fastapi_backend():
-    """Démarre l'API FastAPI en tâche de fond en s'assurant des chemins d'exécution."""
-    # Obtenir le chemin absolu du dossier contenant ce script
+    """Génère le modèle si nécessaire et démarre l'API FastAPI."""
     current_dir = os.path.dirname(os.path.abspath(__file__))
     if current_dir not in sys.path:
         sys.path.append(current_dir)
         
-    # Lancement d'uvicorn avec l'adresse hôte 0.0.0.0 (universelle sur le cloud)
+    # 💡 AJOUT : Si les fichiers n'existent pas sur le serveur cloud, on lance l'entraînement
+    if not os.path.exists(os.path.join(current_dir, "fraud_model.pkl")):
+        with st.spinner("⏳ Premier démarrage : Entraînement du modèle anti-fraude en cours..."):
+            subprocess.run([sys.executable, "train_fraud.py"], cwd=current_dir)
+            time.sleep(1)
+
+    # Lancement d'uvicorn une fois les fichiers garantis présents
     process = subprocess.Popen(
         ["uvicorn", "app_fraud:app", "--host", "0.0.0.0", "--port", "8000"],
-        cwd=current_dir,  # Force le dossier de travail pour qu'uvicorn trouve app_fraud.py
+        cwd=current_dir,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE
     )
@@ -28,15 +33,13 @@ def start_fastapi_backend():
     for _ in range(10):
         time.sleep(1)
         try:
-            # On teste la racine de l'API (ou un endpoint existant)
             response = requests.get("http://127.0.0.1:8000/", timeout=1)
-            if response.status_code in [200, 404]: # 404 ou 200 signifie que le serveur répond
+            if response.status_code in [200, 404]:
                 break
         except requests.exceptions.ConnectionError:
             continue
             
     return process
-
 # Initialisation automatique du serveur au chargement de la page
 backend_process = start_fastapi_backend()
 
