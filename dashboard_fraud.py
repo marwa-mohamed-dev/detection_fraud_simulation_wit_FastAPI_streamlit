@@ -3,21 +3,41 @@ import requests
 import time
 import random
 import pandas as pd
-import subprocess  # 👈 AJOUT: Pour lancer des processus en arrière-plan
+import subprocess
+import os
+import sys
 
-# Lancement automatique de FastAPI en tâche de fond sur le Cloud
+#  Lancement  de FastAPI en tâche de fond sur le Cloud
 @st.cache_resource
 def start_fastapi_backend():
-    """Démarre l'API FastAPI à l'aide d'un sous-processus uvicorn."""
+    """Démarre l'API FastAPI en tâche de fond en s'assurant des chemins d'exécution."""
+    # Obtenir le chemin absolu du dossier contenant ce script
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    if current_dir not in sys.path:
+        sys.path.append(current_dir)
+        
+    # Lancement d'uvicorn avec l'adresse hôte 0.0.0.0 (universelle sur le cloud)
     process = subprocess.Popen(
-        ["uvicorn", "app_fraud:app", "--host", "127.0.0.1", "--port", "8000"],
+        ["uvicorn", "app_fraud:app", "--host", "0.0.0.0", "--port", "8000"],
+        cwd=current_dir,  # Force le dossier de travail pour qu'uvicorn trouve app_fraud.py
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE
     )
-    time.sleep(2)  # Laisse 2 secondes à l'API pour s'initialiser proprement
+    
+    # Attente active pour vérifier si l'API répond
+    for _ in range(10):
+        time.sleep(1)
+        try:
+            # On teste la racine de l'API (ou un endpoint existant)
+            response = requests.get("http://127.0.0.1:8000/", timeout=1)
+            if response.status_code in [200, 404]: # 404 ou 200 signifie que le serveur répond
+                break
+        except requests.exceptions.ConnectionError:
+            continue
+            
     return process
 
-# Initialisation du serveur au chargement de la page
+# Initialisation automatique du serveur au chargement de la page
 backend_process = start_fastapi_backend()
 
 st.set_page_config(page_title="Fraud Watch - Security Dashboard", page_icon="🛡️", layout="wide")
@@ -62,8 +82,9 @@ with col1:
     montant = st.number_input("Montant de la transaction (€)", min_value=0.5, max_value=5000.0, value=default_montant)
     distance = st.number_input("Distance depuis le dernier achat (KM)", min_value=0.0, max_value=20000.0, value=default_distance)
     echecs = st.slider("Nombre d'échecs code PIN consécutifs", min_value=0, max_value=3, value=default_echecs)
-    
-    if st.button("Envoyer la transaction au réseau"):
+
+    st.write("---")
+    if st.button("Envoyer la transaction au réseau", use_container_width=True):
         tx_id = f"TX-{random.randint(100000, 999999)}"
         payload = {
             "Transaction_ID": tx_id,
@@ -73,25 +94,30 @@ with col1:
         }
         
         try:
-            res = requests.post("http://127.0.0.1:8000/v1/evaluate-transaction", json=payload).json()
-            # Ajouter au début de notre liste historique
+            # Appel HTTP à l'API locale
+            response = requests.post("http://127.0.0.1:8000/v1/evaluate-transaction", json=payload, timeout=5)
+            res = response.json()
+            
+            # Insertion du résultat en tête de liste pour l'historique
             st.session_state.tx_history.insert(0, {
                 "ID": tx_id,
-                "Montant": f"{montant} €",
-                "Distance": f"{distance} KM",
+                "Montant": f"{montant:.2f} €",
+                "Distance": f"{distance:.1f} KM",
                 "Score Risque": f"{res['score_risque']:.1%}",
                 "Décision": res['decision']
             })
-        except:
-            st.error("L'API FastAPI sur le port 8000 n'est pas lancée.")
+            st.success(f"Transaction {tx_id} traitée avec succès !")
+        except Exception as e:
+            st.error(" Erreur : L'API FastAPI sur le port 8000 ne répond pas.")
+            # 💡 Affichage de débogage pour comprendre si le processus a planté
+            if backend_process.poll() is not None:
+                st.warning("Le processus FastAPI s'est arrêté de manière inattendue.")
 
 with col2:
     st.header("Flux des transactions en direct")
     if st.session_state.tx_history:
-        # Transformation en DataFrame pour un affichage propre
         df_display = pd.DataFrame(st.session_state.tx_history)
         
-        # Fonction de coloration pour l'interface
         def color_decision(val):
             if val == "BLOCK":
                 return 'background-color: #ffcccc; color: #cc0000; font-weight: bold;'
@@ -99,6 +125,6 @@ with col2:
                 return 'background-color: #ffe6cc; color: #cc6600;'
             return 'background-color: #e6ffed; color: #00802b;'
             
-        st.dataframe(df_display.style.applymap(color_decision, subset=['Décision']), use_container_width=True)
+        st.dataframe(df_display.style.map(color_decision, subset=['Décision']), use_container_width=True)
     else:
         st.info("En attente de transactions... Utilisez le panneau de gauche pour en générer une.")
