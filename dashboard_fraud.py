@@ -3,6 +3,22 @@ import requests
 import time
 import random
 import pandas as pd
+import subprocess  # 👈 AJOUT: Pour lancer des processus en arrière-plan
+
+# Lancement automatique de FastAPI en tâche de fond sur le Cloud
+@st.cache_resource
+def start_fastapi_backend():
+    """Démarre l'API FastAPI à l'aide d'un sous-processus uvicorn."""
+    process = subprocess.Popen(
+        ["uvicorn", "app_fraud:app", "--host", "127.0.0.1", "--port", "8000"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    time.sleep(2)  # Laisse 2 secondes à l'API pour s'initialiser proprement
+    return process
+
+# Initialisation du serveur au chargement de la page
+backend_process = start_fastapi_backend()
 
 st.set_page_config(page_title="Fraud Watch - Security Dashboard", page_icon="🛡️", layout="wide")
 
@@ -17,31 +33,36 @@ col1, col2 = st.columns([1, 2])
 
 with col1:
     st.header("Simuler une transaction")
-    montant = st.number_input("Montant de la transaction (€)", min_value=0.5, max_value=5000.0, value=45.0)
-    distance = st.number_input("Distance depuis le dernier achat (KM)", min_value=0.0, max_value=20000.0, value=2.5)
-    echecs = st.slider("Nombre d'échecs code PIN consécutifs", min_value=0, max_value=3, value=0)
     
-    if st.button("Envoyer la transaction au réseau"):
-        tx_id = f"TX-{random.randint(100000, 999999)}"
-        payload = {
-            "Transaction_ID": tx_id,
-            "Montant": montant,
-            "Distance_Dernier_Achat_KM": distance,
-            "Echecs_Code_PIN": echecs
-        }
-        
-        try:
-            res = requests.post("http://127.0.0.1:8000/v1/evaluate-transaction", json=payload).json()
-            # Ajouter au début de notre liste historique
-            st.session_state.tx_history.insert(0, {
-                "ID": tx_id,
-                "Montant": f"{montant} €",
-                "Distance": f"{distance} KM",
-                "Score Risque": f"{res['score_risque']:.1%}",
-                "Décision": res['decision']
-            })
-        except:
-            st.error("L'API FastAPI sur le port 8000 n'est pas lancée.")
+    #  Raccourcis de simulation automatique
+    st.subheader("Raccourcis scénarios")
+    scenario = st.radio(
+        "Choisir un profil type :",
+        ["Manuel", "Achat Standard (Sain)", "Voyage Suspect (Review)", "Brute-Force & Gros Montant (Fraude)"]
+    )
+    
+    # Configuration des valeurs par défaut selon le scénario sélectionné
+    if scenario == "Achat Standard (Sain)":
+        default_montant = 35.0
+        default_distance = 1.2
+        default_echecs = 0
+    elif scenario == "Voyage Suspect (Review)":
+        default_montant = 180.0
+        default_distance = 120.0
+        default_echecs = 1
+    elif scenario == "Brute-Force & Gros Montant (Fraude)":
+        default_montant = 1500.0
+        default_distance = 850.0
+        default_echecs = 3
+    else:
+        default_montant = 45.0
+        default_distance = 2.5
+        default_echecs = 0
+
+    # Inputs Streamlit connectés aux valeurs par défaut
+    montant = st.number_input("Montant de la transaction (€)", min_value=0.5, max_value=5000.0, value=default_montant)
+    distance = st.number_input("Distance depuis le dernier achat (KM)", min_value=0.0, max_value=20000.0, value=default_distance)
+    echecs = st.slider("Nombre d'échecs code PIN consécutifs", min_value=0, max_value=3, value=default_echecs)
 
 with col2:
     st.header("Flux des transactions en direct")
